@@ -3,29 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zhiguli & Bulba 3D: True Pixel Edition</title>
+    <title>Zhiguli & Bulba 3D: Doom Edition</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', monospace; touch-action: none; user-select: none; }
-        
-        /* ГЛАВНОЕ: Растягиваем маленькую картинку на весь экран без мыла */
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; touch-action: none; user-select: none; }
+        /* Эффект старого монитора и жестких пикселей */
         canvas { 
             display: block; 
             width: 100vw !important; 
             height: 100vh !important; 
-            image-rendering: pixelated; 
-            image-rendering: crisp-edges;
             image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
         }
-
-        #ui { position: absolute; top: 10px; left: 10px; color: #ff0000; font-size: 18px; font-weight: bold; text-shadow: 2px 2px #000; z-index: 10; pointer-events: none; }
-        
-        #message { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); color: red; font-size: 24px; text-align: center; background: rgba(0,0,0,0.9); padding: 20px; border: 4px solid red; display: none; z-index: 20; }
-        
-        #restart-btn { margin-top: 20px; padding: 10px 25px; background: red; color: white; border: none; font-family: 'Courier New', monospace; font-size: 20px; font-weight: bold; cursor: pointer; display: none; pointer-events: auto; }
-
+        #ui { position: absolute; top: 10px; left: 10px; color: #ff0000; font-size: 20px; font-weight: bold; text-shadow: 2px 2px #000; z-index: 10; pointer-events: none; }
         #controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 10; }
-        .btn { width: 70px; height: 70px; background: rgba(100, 100, 100, 0.4); border: 3px solid #555; border-radius: 10px; color: white; font-size: 24px; display: flex; justify-content: center; align-items: center; }
-        .btn:active { background: rgba(255, 255, 255, 0.5); }
+        .control-group { display: flex; gap: 15px; }
+        .btn { width: 70px; height: 70px; background: rgba(100, 100, 100, 0.5); border: 4px solid #555; border-radius: 10px; color: white; font-size: 24px; font-weight: bold; display: flex; justify-content: center; align-items: center; }
+        .btn:active { background: rgba(200, 200, 200, 0.8); }
+        #message { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); color: red; font-size: 24px; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border: 4px solid red; display: none; z-index: 20; }
     </style>
 </head>
 <body>
@@ -34,17 +30,14 @@
     HP: <span id="hp">100</span>% | БУЛЬБА: <span id="score">0</span> | ВРЕМЯ: <span id="time">300</span>
 </div>
 
-<div id="message">
-    <div id="death-text">ЖИГУЛИ СГОРЕЛИ</div>
-    <button id="restart-btn">РЕСТАРТ</button>
-</div>
+<div id="message"></div>
 
 <div id="controls">
-    <div style="display:flex; gap:15px;">
+    <div class="control-group">
         <div class="btn" id="btn-left">◀</div>
         <div class="btn" id="btn-right">▶</div>
     </div>
-    <div style="display:flex; gap:15px;">
+    <div class="control-group">
         <div class="btn" id="btn-brake">▼</div>
         <div class="btn" id="btn-gas">▲</div>
     </div>
@@ -53,148 +46,386 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
 <script>
-    // --- ПИКСЕЛЬНЫЕ ТЕКСТУРЫ (32x32) ---
-    function createPixTex(draw) {
-        const c = document.createElement('canvas');
-        c.width = 32; c.height = 32;
-        const ctx = c.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
-        draw(ctx);
-        const t = new THREE.CanvasTexture(c);
-        t.magFilter = THREE.NearestFilter;
-        t.minFilter = THREE.NearestFilter;
-        return t;
+    // --- ГЕНЕРАТОР ПИКСЕЛЬНЫХ ТЕКСТУР ---
+    // Чтобы не грузить картинки из сети, рисуем их на лету в микро-разрешении (32x32)
+    function createTexture(drawFunction) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 32; canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false; // Отключаем сглаживание канваса
+        drawFunction(ctx);
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.magFilter = THREE.NearestFilter; // Жесткие пиксели в Three.js
+        tex.minFilter = THREE.NearestFilter;
+        return tex;
     }
 
-    const texAsphalt = createPixTex(ctx => { ctx.fillStyle='#333'; ctx.fillRect(0,0,32,32); ctx.fillStyle='#444'; for(let i=0;i<20;i++) ctx.fillRect(Math.random()*32,Math.random()*32,2,2); });
-    const texWall = createPixTex(ctx => { ctx.fillStyle='#555'; ctx.fillRect(0,0,32,32); ctx.fillStyle='#222'; ctx.fillRect(4,4,8,10); ctx.fillRect(20,4,8,10); });
-    const texGopnik = createPixTex(ctx => { ctx.fillStyle='#111'; ctx.fillRect(8,12,16,15); ctx.fillStyle='#fdb813'; ctx.fillRect(12,4,8,8); });
-    const texBulba = createPixTex(ctx => { ctx.fillStyle='#c19a6b'; ctx.beginPath(); ctx.ellipse(16,16,10,7,0,0,7); ctx.fill(); });
-    const texGlass = createPixTex(ctx => { ctx.fillStyle='#1a1a2e'; ctx.fillRect(0,0,32,32); ctx.fillStyle='#4e4e6a'; ctx.fillRect(2,2,28,6); }); // Стекла
+    // Текстура стены (Хрущевка)
+    const texWall = createTexture(ctx => {
+        ctx.fillStyle = '#666'; ctx.fillRect(0,0,32,32);
+        ctx.fillStyle = '#444'; ctx.strokeRect(0,0,32,32); // Стыки панелей
+        ctx.fillStyle = '#222'; ctx.fillRect(4,4,8,10); ctx.fillRect(20,4,8,10); // Окна
+        ctx.fillStyle = '#333'; ctx.fillRect(4,18,8,10); ctx.fillRect(20,18,8,10);
+    });
 
-    // --- МИР ---
-    let gameActive = true, hp = 100, score = 0, timeRemaining = 300, velocity = 0, angle = 0;
-    let enemies = [], items = [];
+    // Текстура асфальта
+    const texAsphalt = createTexture(ctx => {
+        ctx.fillStyle = '#333'; ctx.fillRect(0,0,32,32);
+        for(let i=0; i<30; i++) {
+            ctx.fillStyle = Math.random() > 0.5 ? '#222' : '#444';
+            ctx.fillRect(Math.random()*32, Math.random()*32, 2, 2); // Шум
+        }
+    });
+
+    // Гопник (Черный спортивный костюм с полосками)
+    const texGopnik = createTexture(ctx => {
+        ctx.fillStyle = '#fdb813'; ctx.fillRect(12, 4, 8, 8); // Лицо
+        ctx.fillStyle = '#111'; ctx.fillRect(8, 12, 16, 12); // Куртка
+        ctx.fillRect(10, 24, 4, 8); ctx.fillRect(18, 24, 4, 8); // Ноги
+        ctx.fillStyle = '#fff'; ctx.fillRect(10, 12, 2, 12); ctx.fillRect(20, 12, 2, 12); // Полоски адидас
+        ctx.fillStyle = '#000'; ctx.fillRect(12, 4, 8, 2); // Кепка
+    });
+
+    // Бабка (Платок и пальто)
+    const texGrandma = createTexture(ctx => {
+        ctx.fillStyle = '#800080'; ctx.beginPath(); ctx.arc(16, 10, 6, 0, Math.PI*2); ctx.fill(); // Платок
+        ctx.fillStyle = '#fdb813'; ctx.fillRect(13, 8, 6, 6); // Лицо
+        ctx.fillStyle = '#5c4033'; ctx.fillRect(8, 14, 16, 18); // Пальто
+        ctx.fillStyle = '#333'; ctx.fillRect(14, 28, 4, 4); // Клюка
+    });
+
+    // Бульбамен (Человек с картошкой вместо головы)
+    const texBulbaman = createTexture(ctx => {
+        ctx.fillStyle = '#8b5a2b'; ctx.beginPath(); ctx.ellipse(16, 8, 10, 6, 0, 0, Math.PI*2); ctx.fill(); // Голова-картошка
+        ctx.fillStyle = '#000'; ctx.fillRect(12, 6, 2, 2); ctx.fillRect(18, 6, 2, 2); // Глаза
+        ctx.fillStyle = '#2e8b57'; ctx.fillRect(10, 14, 12, 10); // Рубашка
+        ctx.fillStyle = '#111'; ctx.fillRect(12, 24, 3, 8); ctx.fillRect(17, 24, 3, 8); // Штаны
+    });
+
+    // Бульба (Картошка)
+    const texBulba = createTexture(ctx => {
+        ctx.fillStyle = '#c19a6b'; ctx.beginPath(); ctx.ellipse(16, 16, 12, 8, Math.PI/4, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#8b5a2b'; ctx.fillRect(10,12,2,2); ctx.fillRect(20,16,2,2); ctx.fillRect(14,20,2,2); // Глазки
+    });
+
+    // --- НАСТРОЙКИ СЦЕНЫ ---
+    const GAME_TIME = 300; // 5 минут
+    let timeRemaining = GAME_TIME;
+    let score = 0;
+    let hp = 100;
+    let gameOver = false;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a1a);
-    scene.fog = new THREE.FogExp2(0x1a1a1a, 0.05);
+    scene.fog = new THREE.FogExp2(0x1a1a1a, 0.03); // Плотный туман Doom-стиля
 
+    // РЕНДЕР: Занижаем разрешение для пиксельного ретро-вида
     const renderer = new THREE.WebGLRenderer({ antialias: false });
-    // КЛЮЧ: рендерим в очень маленьком разрешении
-    renderer.setSize(window.innerWidth / 4, window.innerHeight / 4, false);
+    renderer.setSize(window.innerWidth / 3, window.innerHeight / 3, false); // В 3 раза меньше пикселей!
     document.body.appendChild(renderer.domElement);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ map: texAsphalt }));
-    ground.rotation.x = -Math.PI/2;
-    scene.add(ground);
+    // --- МИР ---
+    // Пол
+    texAsphalt.wrapS = THREE.RepeatWrapping; texAsphalt.wrapT = THREE.RepeatWrapping;
+    texAsphalt.repeat.set(50, 50);
+    const planeGeo = new THREE.PlaneGeometry(200, 200);
+    const planeMat = new THREE.MeshBasicMaterial({ map: texAsphalt });
+    const plane = new THREE.Mesh(planeGeo, planeMat);
+    plane.rotation.x = -Math.PI / 2;
+    scene.add(plane);
 
-    for (let i = 0; i < 50; i++) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 4), new THREE.MeshBasicMaterial({ map: texWall }));
-        b.position.set((Math.random()-0.5)*150, 5, (Math.random()-0.5)*150);
-        if(b.position.length()>12) scene.add(b);
+    // Дома (Панельки)
+    const buildings = [];
+    const buildGeo = new THREE.BoxGeometry(4, 10, 4);
+    const buildMat = new THREE.MeshBasicMaterial({ map: texWall });
+    for (let i = 0; i < 60; i++) {
+        const b = new THREE.Mesh(buildGeo, buildMat);
+        b.position.set((Math.random() - 0.5) * 150, 5, (Math.random() - 0.5) * 150);
+        if (b.position.length() > 10) { // Не спавним на игроке
+            scene.add(b);
+            buildings.push(b);
+        }
     }
 
-    // ЖИГУЛИ 3D + СТЕКЛА
+    // --- ИГРОК (ЖИГУЛИ 3D) ---
     const carGroup = new THREE.Group();
-    const carBody = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 4), new THREE.MeshBasicMaterial({ color: 0x800000 }));
-    carBody.position.y = 0.4;
-    const carCabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.7, 2), new THREE.MeshBasicMaterial({ map: texGlass }));
-    carCabin.position.set(0, 1.1, -0.2);
-    carGroup.add(carBody); carGroup.add(carCabin);
+    
+    // Кузов
+    const texCarColor = createTexture(ctx => { ctx.fillStyle='#800000'; ctx.fillRect(0,0,32,32); }); // Вишневая девятка/жигули
+    const texCarGrille = createTexture(ctx => { 
+        ctx.fillStyle='#800000'; ctx.fillRect(0,0,32,32); 
+        ctx.fillStyle='#111'; ctx.fillRect(4,10,24,10); // Решетка
+        ctx.fillStyle='#ffd700'; ctx.fillRect(2,12,6,6); ctx.fillRect(24,12,6,6); // Фары
+    });
+    const texCarBack = createTexture(ctx => {
+        ctx.fillStyle='#800000'; ctx.fillRect(0,0,32,32);
+        ctx.fillStyle='#ff0000'; ctx.fillRect(2,12,6,4); ctx.fillRect(24,12,6,4); // Стопари
+    });
+
+    // Делаем коробку с разными текстурами для сторон
+    const carMats = [
+        new THREE.MeshBasicMaterial({ map: texCarColor }), // Right
+        new THREE.MeshBasicMaterial({ map: texCarColor }), // Left
+        new THREE.MeshBasicMaterial({ map: texCarColor }), // Top
+        new THREE.MeshBasicMaterial({ map: texCarColor }), // Bottom
+        new THREE.MeshBasicMaterial({ map: texCarGrille }), // Front
+        new THREE.MeshBasicMaterial({ map: texCarBack })  // Back
+    ];
+    const carMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.8, 3.5), carMats);
+    carMesh.position.y = 0.4;
+    
+    // Кабина (стекла)
+    const texWindow = createTexture(ctx => { ctx.fillStyle='#222'; ctx.fillRect(0,0,32,32); ctx.fillStyle='#fff'; ctx.fillRect(2,2,4,28); }); // Блик
+    const cabinMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.6, 1.8), new THREE.MeshBasicMaterial({ map: texWindow }));
+    cabinMesh.position.set(0, 1.1, -0.2);
+
+    carGroup.add(carMesh);
+    carGroup.add(cabinMesh);
     scene.add(carGroup);
 
-    // --- ЛОГИКА ---
-    const keys = { gas: 0, brake: 0, left: 0, right: 0 };
-    const bind = (id, k) => {
-        document.getElementById(id).ontouchstart = (e) => { e.preventDefault(); keys[k] = 1; };
-        document.getElementById(id).ontouchend = (e) => { e.preventDefault(); keys[k] = 0; };
+    // Физика авто
+    let velocity = 0;
+    const maxSpeed = 15.0; // Единиц в секунду
+    const acceleration = 10.0;
+    const friction = 5.0;
+    let angle = 0;
+
+    // --- СПРАЙТЫ ВРАГОВ И ЛУТА ---
+    const items = [];
+    const enemies = [];
+    const projectiles = [];
+
+    function spawnBulba() {
+        const mat = new THREE.SpriteMaterial({ map: texBulba });
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.set(carGroup.position.x + (Math.random() - 0.5) * 80, 0.5, carGroup.position.z + (Math.random() - 0.5) * 80);
+        scene.add(sprite);
+        items.push({ mesh: sprite, type: 'bulba' });
+    }
+
+    function spawnEnemy() {
+        const types = ['grandma', 'gopnik', 'bulbaman'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        let tex = type === 'grandma' ? texGrandma : (type === 'gopnik' ? texGopnik : texBulbaman);
+        
+        const mat = new THREE.SpriteMaterial({ map: tex });
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.set(carGroup.position.x + (Math.random() - 0.5) * 60, 1, carGroup.position.z + (Math.random() - 0.5) * 60);
+        sprite.scale.set(1.5, 2, 1); // Вытягиваем спрайты как в Doom
+        scene.add(sprite);
+        enemies.push({ mesh: sprite, type: type, lastShot: 0 });
+    }
+
+    for(let i=0; i<40; i++) spawnBulba();
+    for(let i=0; i<20; i++) spawnEnemy();
+
+    // --- УПРАВЛЕНИЕ ---
+    const keys = { gas: false, brake: false, left: false, right: false };
+
+    window.addEventListener('keydown', (e) => {
+        if(e.key === 'w' || e.key === 'ArrowUp') keys.gas = true;
+        if(e.key === 's' || e.key === 'ArrowDown') keys.brake = true;
+        if(e.key === 'a' || e.key === 'ArrowLeft') keys.left = true;
+        if(e.key === 'd' || e.key === 'ArrowRight') keys.right = true;
+    });
+    window.addEventListener('keyup', (e) => {
+        if(e.key === 'w' || e.key === 'ArrowUp') keys.gas = false;
+        if(e.key === 's' || e.key === 'ArrowDown') keys.brake = false;
+        if(e.key === 'a' || e.key === 'ArrowLeft') keys.left = false;
+        if(e.key === 'd' || e.key === 'ArrowRight') keys.right = false;
+    });
+
+    const bindTouch = (id, key) => {
+        const el = document.getElementById(id);
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+        el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
     };
-    bind('btn-left','left'); bind('btn-right','right'); bind('btn-gas','gas'); bind('btn-brake','brake');
+    bindTouch('btn-gas', 'gas'); bindTouch('btn-brake', 'brake');
+    bindTouch('btn-left', 'left'); bindTouch('btn-right', 'right');
 
-    function spawn() {
-        enemies.forEach(e => scene.remove(e.spr)); enemies = [];
-        items.forEach(i => scene.remove(i.spr)); items = [];
-        for(let i=0; i<20; i++) {
-            const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: texGopnik }));
-            spr.position.set((Math.random()-0.5)*100, 1.2, (Math.random()-0.5)*100);
-            spr.scale.set(1.5, 2.3, 1); scene.add(spr); enemies.push({spr});
-        }
-        for(let i=0; i<40; i++) {
-            const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: texBulba }));
-            spr.position.set((Math.random()-0.5)*120, 0.6, (Math.random()-0.5)*120);
-            scene.add(spr); items.push({spr});
-        }
-    }
-
-    function reset() {
-        hp = 100; score = 0; timeRemaining = 300; velocity = 0; angle = 0;
-        carGroup.position.set(0,0,0);
-        document.getElementById('message').style.display = 'none';
-        document.getElementById('restart-btn').style.display = 'none';
-        document.getElementById('hp').innerText = hp;
-        document.getElementById('score').innerText = score;
-        spawn(); gameActive = true;
-    }
-
-    document.getElementById('restart-btn').onclick = reset;
-
+    // --- ТАЙМЕР ---
     setInterval(() => {
-        if(gameActive) {
-            timeRemaining--; document.getElementById('time').innerText = timeRemaining;
-            if(hp <= 0) {
-                gameActive = false;
-                document.getElementById('message').style.display = 'block';
-                document.getElementById('restart-btn').style.display = 'inline-block';
-            }
-        }
+        if (gameOver) return;
+        timeRemaining--;
+        document.getElementById('time').innerText = timeRemaining;
+        if (timeRemaining <= 0) spawnBoss();
     }, 1000);
 
+    let bossSpawned = false;
+    function spawnBoss() {
+        if (bossSpawned) return;
+        bossSpawned = true;
+        
+        const texBoss = createTexture(ctx => {
+            ctx.fillStyle = '#ffcc99'; ctx.fillRect(8,2,16,14); // Лицо
+            ctx.fillStyle = '#000'; ctx.fillRect(10,12,12,2); // Знаменитые усы
+            ctx.fillStyle = '#111'; ctx.fillRect(4,16,24,16); // Костюм
+        });
+
+        const mat = new THREE.SpriteMaterial({ map: texBoss });
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.set(carGroup.position.x - Math.sin(angle) * 15, 3, carGroup.position.z - Math.cos(angle) * 15);
+        sprite.scale.set(6, 6, 1);
+        scene.add(sprite);
+        
+        const msg = document.getElementById('message');
+        msg.innerHTML = "ВРЕМЯ ПРИШЛО!<br>Отдай бульбу!";
+        msg.style.display = 'block';
+        setTimeout(() => msg.style.display = 'none', 3000);
+        
+        items.push({ mesh: sprite, type: 'boss' });
+    }
+
+    // --- ИГРОВОЙ ЦИКЛ ---
     const clock = new THREE.Clock();
+
     function animate() {
         requestAnimationFrame(animate);
-        if(!gameActive) return;
-        const dt = clock.getDelta();
+        if (gameOver) return;
 
-        if(keys.gas) velocity -= 15 * dt;
-        else if(keys.brake) velocity += 15 * dt;
-        else velocity *= 0.96;
-        velocity = Math.max(Math.min(velocity, 8), -18);
+        const delta = clock.getDelta();
+        const time = clock.getElapsedTime();
 
-        if(Math.abs(velocity) > 0.5) {
-            const t = (velocity < 0 ? 2 : -1.5) * dt;
-            if(keys.left) angle += t; if(keys.right) angle -= t;
+        // Нормальная физика авто
+        if (keys.gas) {
+            velocity -= acceleration * delta; // Вперед (Z идет в минус)
+        } else if (keys.brake) {
+            velocity += acceleration * delta; // Назад
+        } else {
+            // Трение
+            if (velocity < 0) velocity = Math.min(velocity + friction * delta, 0);
+            if (velocity > 0) velocity = Math.max(velocity - friction * delta, 0);
         }
+
+        // Ограничение скорости
+        velocity = Math.max(Math.min(velocity, maxSpeed/2), -maxSpeed);
+
+        // Поворот зависит от скорости (стоя на месте не повернешь)
+        if (Math.abs(velocity) > 0.1) {
+            const turnSpeed = 2.0 * delta * (velocity < 0 ? 1 : -1); // Инвертируем при езде задом
+            if (keys.left) angle += turnSpeed;
+            if (keys.right) angle -= turnSpeed;
+        }
+
         carGroup.rotation.y = angle;
-        carGroup.position.x += Math.sin(angle) * velocity * dt;
-        carGroup.position.z += Math.cos(angle) * velocity * dt;
-
-        camera.position.copy(carGroup.position).add(new THREE.Vector3(0, 3, 7).applyAxisAngle(new THREE.Vector3(0,1,0), angle));
-        camera.lookAt(carGroup.position);
-
-        items.forEach(it => { if(carGroup.position.distanceTo(it.spr.position)<2.2) { 
-            score++; document.getElementById('score').innerText = score;
-            it.spr.position.set((Math.random()-0.5)*100, 0.6, (Math.random()-0.5)*100);
-        }});
         
-        enemies.forEach(en => {
-            const d = carGroup.position.distanceTo(en.spr.position);
-            if(d < 35) en.spr.position.addScaledVector(new THREE.Vector3().subVectors(carGroup.position, en.spr.position).normalize(), 2.5*dt);
-            if(d < 2) { hp -= 25*dt; document.getElementById('hp').innerText = Math.floor(hp); }
+        // Движение вперед туда, куда смотрит машина
+        const moveX = Math.sin(angle) * velocity * delta;
+        const moveZ = Math.cos(angle) * velocity * delta;
+        
+        // Простая проверка коллизий со стенами (панельками)
+        let collision = false;
+        const nextPos = new THREE.Vector3(carGroup.position.x + moveX, 0, carGroup.position.z + moveZ);
+        for(let b of buildings) {
+            if(nextPos.distanceTo(new THREE.Vector3(b.position.x, 0, b.position.z)) < 3) {
+                collision = true;
+                velocity *= -0.5; // Отскок
+                hp -= 5;
+                document.getElementById('hp').innerText = Math.floor(hp);
+                break;
+            }
+        }
+
+        if (!collision) {
+            carGroup.position.x += moveX;
+            carGroup.position.z += moveZ;
+        }
+
+        // Камера сзади сверху (от третьего лица)
+        const camOffset = new THREE.Vector3(0, 3, 7);
+        camOffset.applyAxisAngle(new THREE.Vector3(0,1,0), angle);
+        camera.position.copy(carGroup.position).add(camOffset);
+        camera.lookAt(carGroup.position.x, carGroup.position.y + 1, carGroup.position.z);
+
+        // Сбор бульбы
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            if (carGroup.position.distanceTo(item.mesh.position) < 2.5) {
+                if (item.type === 'bulba') {
+                    score++;
+                    document.getElementById('score').innerText = score;
+                    scene.remove(item.mesh);
+                    items.splice(i, 1);
+                    spawnBulba();
+                } else if (item.type === 'boss') {
+                    gameOver = true;
+                    const msg = document.getElementById('message');
+                    msg.innerHTML = `ПОБЕДА!<br>Сдано бульбы: ${score}`;
+                    msg.style.color = "#0f0";
+                    msg.style.borderColor = "#0f0";
+                    msg.style.display = 'block';
+                }
+            }
+        }
+
+        // Логика врагов
+        enemies.forEach(enemy => {
+            const dist = carGroup.position.distanceTo(enemy.mesh.position);
+            
+            // Враги идут к тебе
+            if (dist < 30 && dist > 1.5) {
+                const dir = new THREE.Vector3().subVectors(carGroup.position, enemy.mesh.position).normalize();
+                enemy.mesh.position.addScaledVector(dir, 2.0 * delta);
+            }
+
+            // Урон в ближнем бою
+            if (dist < 2.0) {
+                hp -= 10 * delta;
+                document.getElementById('hp').innerText = Math.floor(hp);
+            }
+
+            // Бульбамены стреляют (коричневыми квадратами - картошкой)
+            if (enemy.type === 'bulbaman' && dist < 40 && time - enemy.lastShot > 1.5) {
+                enemy.lastShot = time;
+                const pMat = new THREE.SpriteMaterial({ map: texBulba });
+                const p = new THREE.Sprite(pMat);
+                p.position.copy(enemy.mesh.position);
+                p.position.y = 1;
+                const dir = new THREE.Vector3().subVectors(carGroup.position, enemy.mesh.position).normalize();
+                scene.add(p);
+                projectiles.push({ mesh: p, dir: dir, life: 2.0 });
+            }
         });
+
+        // Полет снарядов
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            p.life -= delta;
+            p.mesh.position.addScaledVector(p.dir, 15 * delta);
+
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                projectiles.splice(i, 1);
+                continue;
+            }
+
+            if (p.mesh.position.distanceTo(carGroup.position) < 1.5) {
+                hp -= 10;
+                document.getElementById('hp').innerText = Math.floor(hp);
+                scene.remove(p.mesh);
+                projectiles.splice(i, 1);
+            }
+        }
+
+        if (hp <= 0 && !gameOver) {
+            gameOver = true;
+            const msg = document.getElementById('message');
+            msg.innerHTML = "ЖИГУЛИ СГОРЕЛИ<br>Геймовер";
+            msg.style.display = 'block';
+        }
 
         renderer.render(scene, camera);
     }
 
-    spawn();
-    animate();
-    window.onresize = () => { 
-        renderer.setSize(window.innerWidth / 4, window.innerHeight / 4, false);
+    window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
-    };
+        renderer.setSize(window.innerWidth / 3, window.innerHeight / 3, false);
+    });
+
+    animate();
 </script>
 </body>
 </html>
